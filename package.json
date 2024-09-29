@@ -1,0 +1,19 @@
+{
+  "name": "termvas",
+  "version": "1.0.6",
+  "description": "A simple tool for dynamic terminal printing.",
+  "main": "termvas.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "terminal",
+    "ui",
+    "rendering"
+  ],
+  "author": "codecreamery",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "input-handler": "^1.0.2"
+  }
+}
