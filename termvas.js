@@ -74,18 +74,14 @@ class termvas extends EventHandler {
 
     // Pushes updates to the relevant parts of the buffer.
     setChar(x, y, text, fg, bg) {
-        if(x < 1 || y < 1) throw new Error("Invalid screenspace coordinates: Value cannot be less than 1.");
-        let xPos = (x < 1) ? (0) : (x - 1);
-        let yPos = (y < 1) ? (0) : (y - 1);
-
-        let source = this.buffer[yPos][xPos];
+        let source = this.buffer[y][x];
         let ref = { ...source };
 
         if (ref.ch !== text) ref.ch = text;
         if (ref.fg !== fg && fg !== undefined && fg !== null) ref.fg = fg;
         if (ref.bg !== bg && bg !== undefined && bg !== null) ref.bg = bg;
 
-        this.updateBuffer[yPos][xPos] = { ...ref };
+        this.updateBuffer[y][x] = { ...ref };
         this.bufferUpdated = true;  // Mark buffer as updated
     }
 
@@ -126,6 +122,10 @@ class termvas extends EventHandler {
 
         // Iterate through cells.
         for(let h = 0; h < this.height; h++) {
+            let lastXPos = 0;
+            let lastFg = null;
+            let lastBg = null;
+
             for(let w = 0; w < this.width; w++) {
                 let oldCell = this.buffer[h][w]; // Original cell.
                 let newCell = this.updateBuffer[h][w]; // Mask to apply if different;
@@ -135,27 +135,65 @@ class termvas extends EventHandler {
                 let bgChanged = (this.defaultCell.bg !== newCell.bg);
                 let chChanged = (this.defaultCell.ch !== newCell.ch);
 
+                // Simplification...
                 let cellNeedsUpdate = (fgChanged || bgChanged || chChanged);
                 let cellIsCursor = (this.mouseX === w) && (this.mouseY === h);
                 let cellWasCursor = oldCell.wasCursor && !cellIsCursor;
 
-                if (cellIsCursor) {
-                    process.stdout.write(`\x1b[${h + 1};${w + 1}H\x1b[${this.#getFgCode('white')}m\x1b[${this.#getBgCode('white')}m \x1b[0m`);
+                // Further simplification... *sigh*
+                let drawCursor = cellIsCursor && this.renderMouse;
+                let drawBuff = cellWasCursor && !cellNeedsUpdate;
+                let drawNewCell = cellNeedsUpdate;
+
+                // These we do need.
+                let mustDraw = (drawCursor + drawBuff + drawNewCell);
+                let madeJump = lastXPos !== w - 1;
+
+                // Update the cursor position if we're writing and also making a jump.
+                if(mustDraw && madeJump) {
+                    lastXPos = w;
+                    process.stdout.write(`\x1b[${h + 1};${w + 1}H`)
+                }
+
+                //TODO: Implement smart color changes.
+
+                if (drawCursor) {
+                    // We're just always going to assume this is a change. For now.
+                    let fg = (lastFg !== 'white') ? `\x1b[${this.#getFgCode('white')}m` : '';
+                    let bg = (lastBg !== 'white') ? `\x1b[${this.#getBgCode('white')}m` : '';
+                    if (lastFg !== 'white') lastFg = 'white';
+                    if (lastBg !== 'white') lastBg = 'white';
+
+                    process.stdout.write(`\x1b[${this.#getFgCode('white')}m\x1b[${this.#getBgCode('white')}m `);
                     this.buffer[h][w].wasCursor = true;
-                } else if (cellWasCursor && !cellNeedsUpdate) {
-                    process.stdout.write(`\x1b[${h + 1};${w + 1}H\x1b[${this.#getFgCode(oldCell.fg)}m\x1b[${this.#getBgCode(oldCell.bg)}m${oldCell.ch}\x1b[0m`);
+                } else if (drawBuff) {
+                    let fg = (lastFg !== oldCell.fg) ? `\x1b[${this.#getFgCode(oldCell.fg)}m` : '';
+                    let bg = (lastBg !== oldCell.bg) ? `\x1b[${this.#getBgCode(oldCell.bg)}m` : '';
+
+                    if (lastFg !== oldCell.fg) lastFg = oldCell.fg;
+                    if (lastBg !== oldCell.bg) lastBg = oldCell.bg;
+
+                    process.stdout.write(`${fg + bg}${oldCell.ch}`);
                     this.buffer[h][w].wasCursor = false;
-                } else if (cellNeedsUpdate) {
-                    //console.log('updating!'); // This never gets called. For some reason we're not getting to the cell-needs-update block.
+                } else if (drawNewCell) {
                     this.buffer[h][w] = { ...this.updateBuffer[h][w] };
-                    process.stdout.write(`\x1b[${h + 1};${w + 1}H\x1b[${this.#getFgCode(this.buffer[h][w].fg)}m\x1b[${this.#getBgCode(this.buffer[h][w].bg)}m${this.buffer[h][w].ch}\x1b[0m`);
+
+                    let fg = (lastFg !== this.buffer[h][w].fg) ? `\x1b[${this.#getFgCode(this.buffer[h][w].fg)}m` : '';
+                    let bg = (lastBg !== this.buffer[h][w].bg) ? `\x1b[${this.#getBgCode(this.buffer[h][w].bg)}m` : '';
+                    if (lastFg !== this.buffer[h][w].fg) lastFg = this.buffer[h][w].fg;
+                    if (lastBg !== this.buffer[h][w].bg) lastBg = this.buffer[h][w].bg;
+
+                    process.stdout.write(`${fg + bg}${this.buffer[h][w].ch}`);
                     this.updateBuffer[h][w] = { ...this.defaultCell };
                 }               
 
                 // For Reference.
                 //process.stdout.write(`\x1b[${py};${px}H\x1b[${this.#getFgCode(fg)}m\x1b[${this.#getBgCode(bg)}m${ch}\x1b[0m`);
             }
+            lastXPos = 6413607225; // Some dumb number to force a jump condition if we have to write right away.
         }
+
+        process.stdout.write('\x1b[0m');
     }
 }
 
@@ -185,5 +223,7 @@ function selftest() {
         testDisplay.render();
     }, 32);
 }
+
+//selftest();
 
 module.exports = termvas

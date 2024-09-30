@@ -1,10 +1,14 @@
 {
   "name": "termvas",
-  "version": "1.0.6",
+  "version": "1.1.1",
   "description": "A simple tool for dynamic terminal printing.",
   "main": "termvas.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SilicateWielder/termvas.git"
   },
   "keywords": [
     "terminal",
