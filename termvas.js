@@ -1,11 +1,8 @@
-let inputHandler = new (require('input-handler'))(); // For future use.
-let EventHandler = require('events');
+let inputHandler = require('input-handler');
+//  - Changed termvas to be an extension of input-handler rather than EventHandler.
+//  - Realigned cursor tracking to use the now-internal this.on method.
 
-// CHANGES:
-//  - Simplified rendering code
-//  - cursor rendering implemented (WIP)
-
-class termvas extends EventHandler {
+class termvas extends inputHandler {
     constructor(rendermouse = false) {
         super();
 
@@ -16,7 +13,7 @@ class termvas extends EventHandler {
         this.mouseX = 0;
         this.mouseY = 0;
         if (this.renderMouse) {
-            inputHandler.on('mouse-move', (pos) => {
+            this.on('mouse-move', (pos) => {
                 //console.log(`Mouse moved to x:${pos.x}, y:${pos.y}`);
                 // Coordinates get adjusted to match 0-indexing.
                 this.mouseX = pos.x - 1;

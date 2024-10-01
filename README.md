@@ -15,7 +15,8 @@ let ui = new (require('termvas'))();
 ```
 
 Now you can write individual characters or text anywhere on the screen! Termvas natively supports basic colors. Use 'default' to revert to your terminal's default colors.
-Set Character
+
+###Set Character
 
 To set a single character with optional colors:
 
