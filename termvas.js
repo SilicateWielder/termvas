@@ -1,6 +1,6 @@
 let inputHandler = require('input-handler');
-//  - Changed termvas to be an extension of input-handler rather than EventHandler.
-//  - Realigned cursor tracking to use the now-internal this.on method.
+//  - Added check within render, to only progress if changes were made.
+//  - Added flag to buffers to test if individual rows have been altered before rendering.
 
 class termvas extends inputHandler {
     constructor(rendermouse = false) {
@@ -21,28 +21,30 @@ class termvas extends inputHandler {
             });
         }
 
+        this.updated = true;
+
         this.fgMatrix = {
-            'black': '30',
-            'red': '31',
-            'green': '32',
-            'yellow': '33',
-            'blue': '34',
-            'magenta': '35',
-            'cyan': '36',
-            'white': '37',
-            'default': '39',
+            'black': '\x1b[30m',
+            'red': '\x1b[31m',
+            'green': '\x1b[32m',
+            'yellow': '\x1b[33m',
+            'blue': '\x1b[34m',
+            'magenta': '\x1b[35m',
+            'cyan': '\x1b[36m',
+            'white': '\x1b[37m',
+            'default': '\x1b[39m',
         };
 
         this.bgMatrix = {
-            'black': '40',
-            'red': '41',
-            'green': '42',
-            'yellow': '43',
-            'blue': '44',
-            'magenta': '45',
-            'cyan': '46',
-            'white': '47',
-            'default': '49',
+            'black': '\x1b[40m',
+            'red': '\x1b[41m',
+            'green': '\x1b[42m',
+            'yellow': '\x1b[43m',
+            'blue': '\x1b[44m',
+            'magenta': '\x1b[45m',
+            'cyan': '\x1b[46m',
+            'white': '\x1b[47m',
+            'default': '\x1b[49m',
         };
 
         this.defaultCell = { fg: 'default', bg: 'default', ch: ' ', wasCursor: false };
@@ -51,6 +53,7 @@ class termvas extends inputHandler {
         this.height = process.stdout.rows;
 
         this.updateBuffer = this.#initScreenBuffer(this.width, this.height);
+        this.updateRef = [];
         this.buffer = this.#initScreenBuffer(this.width, this.height);
         this.bufferUpdated = false;
     }
@@ -69,6 +72,29 @@ class termvas extends inputHandler {
         return buffer;
     }
 
+    #getCell(x, y) {
+        return this.buffer[y][x];
+    }
+
+    #getMaskCell(x, y) {
+        return this.updateBuffer[y][x];
+    }
+
+    // Copies cell from updatebuffer to buffer before clearing the updatebuffer cell.
+    #maskCell(x, y) {
+        if(this.buffer[y][x] === undefined ) return;
+        this.buffer[y][x] = { ...this.updateBuffer[y][x] };
+        this.updateBuffer[y][x] = this.defaultCell;
+    }
+
+    #getFgString(color) {
+        return this.fgMatrix[color];
+    }
+
+    #getBgString(color) {
+        return this.bgMatrix[color];
+    }
+
     // Pushes updates to the relevant parts of the buffer.
     setChar(x, y, text, fg, bg) {
         let source = this.buffer[y][x];
@@ -80,6 +106,8 @@ class termvas extends inputHandler {
 
         this.updateBuffer[y][x] = { ...ref };
         this.bufferUpdated = true;  // Mark buffer as updated
+
+        if(this.updated !== true) this.updated = true;
     }
 
     // Writes text to a specific portion of the buffer.
@@ -89,20 +117,8 @@ class termvas extends inputHandler {
 		}
 	}
 
-    // Gets color code for foreground
-    #getFgCode(fgColor) {
-
-        return this.fgMatrix[fgColor];
-    }
-
-    // Gets color code for background.
-    #getBgCode(bgColor) {
-        return this.bgMatrix[bgColor];
-    }
-
     // Renders the whole screen.
     render() {
-
         // Hide cursor and set up exit event.
         if (!this.cursorHidden) {
             process.stdout.write('\x1b[?25l'); // Hide cursor.
@@ -117,6 +133,10 @@ class termvas extends inputHandler {
             });
         }
 
+        let cursorRendered = false;
+
+        if(this.updated === false) return;
+
         // Iterate through cells.
         for(let h = 0; h < this.height; h++) {
             let lastXPos = 0;
@@ -124,6 +144,7 @@ class termvas extends inputHandler {
             let lastBg = null;
 
             for(let w = 0; w < this.width; w++) {
+                let string = '';
                 let oldCell = this.buffer[h][w]; // Original cell.
                 let newCell = this.updateBuffer[h][w]; // Mask to apply if different;
 
@@ -132,65 +153,54 @@ class termvas extends inputHandler {
                 let bgChanged = (this.defaultCell.bg !== newCell.bg);
                 let chChanged = (this.defaultCell.ch !== newCell.ch);
 
-                // Simplification...
+                // Basic Checks
                 let cellNeedsUpdate = (fgChanged || bgChanged || chChanged);
                 let cellIsCursor = (this.mouseX === w) && (this.mouseY === h);
-                let cellWasCursor = oldCell.wasCursor && !cellIsCursor;
 
-                // Further simplification... *sigh*
-                let drawCursor = cellIsCursor && this.renderMouse;
-                let drawBuff = cellWasCursor && !cellNeedsUpdate;
-                let drawNewCell = cellNeedsUpdate;
+                // Final checks
+                let drawCursor = cellIsCursor && this.renderMouse && !cursorRendered;
+                let drawBuff = oldCell.wasCursor && !cellIsCursor && !cellNeedsUpdate;
 
-                // These we do need.
-                let mustDraw = (drawCursor + drawBuff + drawNewCell);
+                // Checks to determine if we're jumping around in the terminal.
+                let mustDraw = (drawCursor || drawBuff || cellNeedsUpdate);
                 let madeJump = lastXPos !== w - 1;
 
                 // Update the cursor position if we're writing and also making a jump.
                 if(mustDraw && madeJump) {
                     lastXPos = w;
-                    process.stdout.write(`\x1b[${h + 1};${w + 1}H`)
+                    string += (`\x1b[${h + 1};${w + 1}H`)
                 }
 
                 //TODO: Implement smart color changes.
 
                 if (drawCursor) {
                     // We're just always going to assume this is a change. For now.
-                    let fg = (lastFg !== 'white') ? `\x1b[${this.#getFgCode('white')}m` : '';
-                    let bg = (lastBg !== 'white') ? `\x1b[${this.#getBgCode('white')}m` : '';
-                    if (lastFg !== 'white') lastFg = 'white';
-                    if (lastBg !== 'white') lastBg = 'white';
+                    let fg = (lastFg !== 'white') ? (lastFg = 'white', this.#getFgString('white')) : '';
+                    let bg = (lastBg !== 'white') ? (lastBg = 'white', this.#getBgString('white')) : '';
 
-                    process.stdout.write(`\x1b[${this.#getFgCode('white')}m\x1b[${this.#getBgCode('white')}m `);
+                    string += (`${fg + bg}${oldCell.ch}`);
                     this.buffer[h][w].wasCursor = true;
                 } else if (drawBuff) {
-                    let fg = (lastFg !== oldCell.fg) ? `\x1b[${this.#getFgCode(oldCell.fg)}m` : '';
-                    let bg = (lastBg !== oldCell.bg) ? `\x1b[${this.#getBgCode(oldCell.bg)}m` : '';
+                    let fg = (lastFg !== oldCell.fg) ? (lastFg = oldCell.fg, this.#getFgString(oldCell.fg)) : '';
+                    let bg = (lastBg !== oldCell.bg) ? (lastBg = oldCell.bg, this.#getBgString(oldCell.bg)) : '';
 
-                    if (lastFg !== oldCell.fg) lastFg = oldCell.fg;
-                    if (lastBg !== oldCell.bg) lastBg = oldCell.bg;
-
-                    process.stdout.write(`${fg + bg}${oldCell.ch}`);
+                    string += (`${fg + bg}${oldCell.ch}`);
                     this.buffer[h][w].wasCursor = false;
-                } else if (drawNewCell) {
-                    this.buffer[h][w] = { ...this.updateBuffer[h][w] };
+                } else if (cellNeedsUpdate) {
+                    let fg = (lastFg !== newCell.fg) ? (lastFg = newCell.fg, this.#getFgString(newCell.fg)) : '';
+                    let bg = (lastBg !== newCell.bg) ? (lastBg = newCell.bg, this.#getBgString(newCell.bg)) : '';
 
-                    let fg = (lastFg !== this.buffer[h][w].fg) ? `\x1b[${this.#getFgCode(this.buffer[h][w].fg)}m` : '';
-                    let bg = (lastBg !== this.buffer[h][w].bg) ? `\x1b[${this.#getBgCode(this.buffer[h][w].bg)}m` : '';
-                    if (lastFg !== this.buffer[h][w].fg) lastFg = this.buffer[h][w].fg;
-                    if (lastBg !== this.buffer[h][w].bg) lastBg = this.buffer[h][w].bg;
-
-                    process.stdout.write(`${fg + bg}${this.buffer[h][w].ch}`);
-                    this.updateBuffer[h][w] = { ...this.defaultCell };
+                    string += (`${fg + bg}${this.buffer[h][w].ch}`);
+                    this.#maskCell(w, h)
                 }               
 
-                // For Reference.
-                //process.stdout.write(`\x1b[${py};${px}H\x1b[${this.#getFgCode(fg)}m\x1b[${this.#getBgCode(bg)}m${ch}\x1b[0m`);
+                if(string !== '' ) process.stdout.write(string);
             }
+            process.stdout.write('\x1b[0m');
             lastXPos = 6413607225; // Some dumb number to force a jump condition if we have to write right away.
         }
 
-        process.stdout.write('\x1b[0m');
+        this.updated = false;
     }
 }
 
